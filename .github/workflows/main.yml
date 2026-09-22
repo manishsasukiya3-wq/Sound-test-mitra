@@ -16,11 +16,11 @@ jobs:
 
     steps:
 
-      # 1. Checkout repository
+      # 1. Checkout
       - name: Checkout
         uses: actions/checkout@v6
 
-      # 2. Find and extract ZIP
+      # 2. Extract ZIP
       - name: Extract Test Mitra ZIP
         shell: bash
         run: |
@@ -42,8 +42,7 @@ jobs:
           unzip -q "$ZIP" -d extracted
 
           echo ""
-          echo "Extracted files:"
-          find extracted -maxdepth 2 -type f | head -100
+          echo "ZIP extracted successfully."
 
       # 3. Find React/Vite project
       - name: Find Web Project
@@ -67,7 +66,6 @@ jobs:
           echo "$PROJECT_DIR"
 
           echo ""
-          echo "Project files:"
           ls -la "$PROJECT_DIR"
 
       # 4. Setup Node.js
@@ -75,8 +73,6 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: "${{ env.PROJECT_DIR }}/package.json"
 
       # 5. Setup JDK 17
       - name: Setup JDK 17
@@ -85,32 +81,59 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # 6. Install npm dependencies
+      # 6. Fix Vite dependency compatibility
+      - name: Fix Vite Dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          echo "Installing compatible Vite version..."
+
+          npm install \
+            vite@7.2.2 \
+            esbuild@0.27.0 \
+            --save-dev \
+            --legacy-peer-deps
+
+          echo ""
+          echo "Installed versions:"
+          npm list vite esbuild @tailwindcss/vite --depth=0 || true
+
+      # 7. Install remaining dependencies
       - name: Install npm dependencies
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -e
 
-          npm install
+          npm install --legacy-peer-deps
 
-      # 7. Install Capacitor
+      # 8. Install Capacitor
       - name: Install Capacitor
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -e
 
-          npm install @capacitor/core@7.4.4
-          npm install -D @capacitor/cli@7.4.4
-          npm install @capacitor/android@7.4.4
+          npm install \
+            @capacitor/core@7.4.4 \
+            @capacitor/android@7.4.4 \
+            --legacy-peer-deps
 
-      # 8. Build React/Vite application
+          npm install \
+            --save-dev \
+            @capacitor/cli@7.4.4 \
+            --legacy-peer-deps
+
+      # 9. Build React/Vite application
       - name: Build Web Application
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -e
+
+          echo "Building Test Mitra..."
 
           npm run build
 
@@ -120,25 +143,31 @@ jobs:
           fi
 
           echo ""
-          echo "Web build completed:"
+          echo "Web build successful."
+
           du -sh dist
 
-      # 9. Create Capacitor configuration
+      # 10. Create Capacitor configuration
       - name: Create Capacitor Configuration
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -e
 
-          if [ ! -f "capacitor.config.ts" ] && [ ! -f "capacitor.config.json" ]; then
-            npx cap init "Test Mitra" "com.testmitra.app" --web-dir dist
+          if [ ! -f "capacitor.config.ts" ] && \
+             [ ! -f "capacitor.config.json" ]; then
+
+            npx cap init \
+              "Test Mitra" \
+              "com.testmitra.app" \
+              --web-dir dist
           fi
 
           echo ""
           echo "Capacitor configuration:"
           ls -la capacitor.config.* 2>/dev/null || true
 
-      # 10. Add Android platform
+      # 11. Add Android platform
       - name: Add Android Platform
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
@@ -148,10 +177,10 @@ jobs:
           if [ ! -d "android" ]; then
             npx cap add android
           else
-            echo "Android platform already exists"
+            echo "Android platform already exists."
           fi
 
-      # 11. Copy web files into Android project
+      # 12. Sync Capacitor
       - name: Sync Capacitor Android
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
@@ -160,26 +189,29 @@ jobs:
 
           npx cap sync android
 
-      # 12. Show Android project
+      # 13. Verify Android project
       - name: Verify Android Project
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -e
 
-          if [ ! -f "android/settings.gradle" ] && [ ! -f "android/settings.gradle.kts" ]; then
-            echo "ERROR: Android Gradle project was not created"
+          if [ ! -f "android/settings.gradle" ] && \
+             [ ! -f "android/settings.gradle.kts" ]; then
+
+            echo "ERROR: Android Gradle project was not created."
             exit 1
           fi
 
           if [ ! -f "android/gradlew" ]; then
-            echo "ERROR: Gradle wrapper was not created"
+            echo "ERROR: Gradle wrapper was not created."
             exit 1
           fi
 
-          echo "Android project created successfully."
+          echo ""
+          echo "Android project verified successfully."
 
-      # 13. Build APK
+      # 14. Build APK
       - name: Build Debug APK
         working-directory: ${{ env.PROJECT_DIR }}/android
         shell: bash
@@ -192,7 +224,7 @@ jobs:
             --no-daemon \
             --stacktrace
 
-      # 14. Verify APK
+      # 15. Verify APK
       - name: Verify APK
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
@@ -205,19 +237,19 @@ jobs:
             | head -n 1)
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated"
+            echo "ERROR: APK was not generated."
             exit 1
           fi
 
           echo ""
           echo "======================================"
-          echo "APK GENERATED SUCCESSFULLY"
+          echo "TEST MITRA APK GENERATED SUCCESSFULLY"
           echo "======================================"
           echo ""
 
           ls -lh "$APK"
 
-      # 15. Upload APK
+      # 16. Upload APK
       - name: Upload Test Mitra APK
         uses: actions/upload-artifact@v6
         with:
