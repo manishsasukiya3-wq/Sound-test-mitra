@@ -49,13 +49,9 @@ jobs:
           echo ""
           echo "ZIP extracted successfully."
 
-          echo ""
-          echo "Top-level files:"
-          find extracted -maxdepth 2 -type f | head -100
-
 
       # =========================================================
-      # 3. FIND REACT/VITE PROJECT
+      # 3. FIND WEB PROJECT
       # =========================================================
       - name: Find Web Project
         shell: bash
@@ -77,18 +73,16 @@ jobs:
           echo "Test Mitra project:"
           echo "$PROJECT_DIR"
 
-          echo ""
-          echo "Project files:"
           ls -la "$PROJECT_DIR"
 
 
       # =========================================================
-      # 4. SETUP NODE.JS
+      # 4. SETUP NODE.JS 20
       # =========================================================
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: "22"
+          node-version: "20"
 
 
       # =========================================================
@@ -102,7 +96,7 @@ jobs:
 
 
       # =========================================================
-      # 6. FIX VITE / REACT / TAILWIND COMPATIBILITY
+      # 6. FIX VITE / REACT DEPENDENCIES
       # =========================================================
       - name: Fix Vite Dependencies
         working-directory: ${{ env.PROJECT_DIR }}
@@ -110,7 +104,7 @@ jobs:
         run: |
           set -e
 
-          echo "Fixing Vite dependency compatibility..."
+          echo "Fixing Vite dependencies..."
 
           npm install \
             vite@7.2.2 \
@@ -122,6 +116,7 @@ jobs:
 
           echo ""
           echo "Installed versions:"
+
           npm list \
             vite \
             @vitejs/plugin-react \
@@ -131,15 +126,13 @@ jobs:
 
 
       # =========================================================
-      # 7. INSTALL ALL NPM DEPENDENCIES
+      # 7. INSTALL NPM DEPENDENCIES
       # =========================================================
       - name: Install npm dependencies
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -e
-
-          echo "Installing project dependencies..."
 
           npm install --legacy-peer-deps
 
@@ -156,8 +149,6 @@ jobs:
         run: |
           set -e
 
-          echo "Installing Capacitor..."
-
           npm install \
             @capacitor/core@7.4.4 \
             @capacitor/android@7.4.4 \
@@ -173,9 +164,11 @@ jobs:
           echo ""
           echo "Capacitor installed."
 
+          npx cap --version
+
 
       # =========================================================
-      # 9. BUILD REACT / VITE APP
+      # 9. BUILD WEB APPLICATION
       # =========================================================
       - name: Build Web Application
         working-directory: ${{ env.PROJECT_DIR }}
@@ -184,54 +177,74 @@ jobs:
           set -e
 
           echo "======================================"
-          echo "Building Test Mitra Web Application"
+          echo "Building Test Mitra"
           echo "======================================"
 
           npm run build
 
           if [ ! -d "dist" ]; then
-            echo ""
-            echo "ERROR: dist folder was not created."
+            echo "ERROR: dist folder was not created"
             exit 1
           fi
 
           echo ""
           echo "Web build successful."
 
-          echo ""
-          echo "Build size:"
           du -sh dist
 
 
       # =========================================================
-      # 10. CREATE CAPACITOR CONFIGURATION
+      # 10. REMOVE OLD CAPACITOR CONFIG
       # =========================================================
-      - name: Create Capacitor Configuration
+      - name: Prepare Capacitor Configuration
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -e
 
-          if [ ! -f "capacitor.config.ts" ] && \
-             [ ! -f "capacitor.config.json" ]; then
+          echo "Removing incompatible TypeScript Capacitor config..."
 
-            echo "Creating Capacitor configuration..."
+          rm -f capacitor.config.ts
+          rm -f capacitor.config.js
+          rm -f capacitor.config.mjs
+          rm -f capacitor.config.cjs
 
-            npx cap init \
-              "Test Mitra" \
-              "com.testmitra.app" \
-              --web-dir dist
-          else
-            echo "Capacitor configuration already exists."
-          fi
+          echo ""
+          echo "Creating capacitor.config.json..."
+
+          cat > capacitor.config.json <<'EOF'
+          {
+            "appId": "com.testmitra.app",
+            "appName": "Test Mitra",
+            "webDir": "dist"
+          }
+          EOF
 
           echo ""
           echo "Capacitor configuration:"
-          ls -la capacitor.config.* 2>/dev/null || true
+          cat capacitor.config.json
 
 
       # =========================================================
-      # 11. ADD ANDROID PLATFORM
+      # 11. REMOVE OLD ANDROID PLATFORM IF ANY
+      # =========================================================
+      - name: Prepare Android Platform
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          if [ -d "android" ]; then
+            echo "Android directory already exists."
+            echo "Using existing Android project."
+          else
+            echo "Android directory does not exist."
+            echo "It will be created by Capacitor."
+          fi
+
+
+      # =========================================================
+      # 12. ADD ANDROID PLATFORM
       # =========================================================
       - name: Add Android Platform
         working-directory: ${{ env.PROJECT_DIR }}
@@ -240,16 +253,20 @@ jobs:
           set -e
 
           if [ ! -d "android" ]; then
+
             echo "Creating Android platform..."
 
             npx cap add android
+
           else
+
             echo "Android platform already exists."
+
           fi
 
 
       # =========================================================
-      # 12. SYNC CAPACITOR
+      # 13. SYNC CAPACITOR
       # =========================================================
       - name: Sync Capacitor Android
         working-directory: ${{ env.PROJECT_DIR }}
@@ -257,16 +274,16 @@ jobs:
         run: |
           set -e
 
-          echo "Syncing Test Mitra with Android..."
+          echo "Syncing Capacitor..."
 
           npx cap sync android
 
           echo ""
-          echo "Capacitor Android sync completed."
+          echo "Capacitor sync completed."
 
 
       # =========================================================
-      # 13. VERIFY ANDROID PROJECT
+      # 14. VERIFY ANDROID PROJECT
       # =========================================================
       - name: Verify Android Project
         working-directory: ${{ env.PROJECT_DIR }}
@@ -279,17 +296,19 @@ jobs:
           if [ ! -f "android/settings.gradle" ] && \
              [ ! -f "android/settings.gradle.kts" ]; then
 
-            echo "ERROR: Android settings.gradle not found."
+            echo "ERROR: settings.gradle not found"
             exit 1
           fi
 
           if [ ! -f "android/gradlew" ]; then
-            echo "ERROR: Gradle wrapper not found."
+
+            echo "ERROR: Gradle wrapper not found"
             exit 1
           fi
 
           if [ ! -d "android/app" ]; then
-            echo "ERROR: Android app directory not found."
+
+            echo "ERROR: Android app directory not found"
             exit 1
           fi
 
@@ -298,7 +317,7 @@ jobs:
 
 
       # =========================================================
-      # 14. MAKE GRADLE WRAPPER EXECUTABLE
+      # 15. PREPARE GRADLE
       # =========================================================
       - name: Prepare Gradle
         working-directory: ${{ env.PROJECT_DIR }}/android
@@ -308,11 +327,11 @@ jobs:
 
           chmod +x gradlew
 
-          echo "Gradle wrapper is ready."
+          echo "Gradle wrapper ready."
 
 
       # =========================================================
-      # 15. BUILD DEBUG APK
+      # 16. BUILD DEBUG APK
       # =========================================================
       - name: Build Debug APK
         working-directory: ${{ env.PROJECT_DIR }}/android
@@ -321,7 +340,7 @@ jobs:
           set -e
 
           echo "======================================"
-          echo "Building Test Mitra APK"
+          echo "BUILDING TEST MITRA APK"
           echo "======================================"
 
           ./gradlew assembleDebug \
@@ -333,7 +352,7 @@ jobs:
 
 
       # =========================================================
-      # 16. VERIFY APK
+      # 17. VERIFY APK
       # =========================================================
       - name: Verify APK
         working-directory: ${{ env.PROJECT_DIR }}
@@ -347,9 +366,10 @@ jobs:
             | head -n 1)
 
           if [ -z "$APK" ]; then
-            echo ""
-            echo "ERROR: APK was not generated."
+
+            echo "ERROR: APK was not generated"
             exit 1
+
           fi
 
           echo ""
@@ -358,7 +378,7 @@ jobs:
           echo "======================================"
 
           echo ""
-          echo "APK:"
+          echo "APK location:"
           echo "$APK"
 
           echo ""
@@ -367,7 +387,7 @@ jobs:
 
 
       # =========================================================
-      # 17. UPLOAD APK
+      # 18. UPLOAD APK
       # =========================================================
       - name: Upload Test Mitra APK
         uses: actions/upload-artifact@v6
