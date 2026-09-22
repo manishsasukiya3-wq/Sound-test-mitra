@@ -15,99 +15,212 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # 1. Checkout repository
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Extract ZIP
+      # 2. Find and extract ZIP
+      - name: Extract Test Mitra ZIP
+        shell: bash
         run: |
+          set -e
+
           ZIP=$(find . -maxdepth 2 -type f -name "*.zip" | head -n 1)
 
           if [ -z "$ZIP" ]; then
-            echo "ZIP file not found"
+            echo "ERROR: ZIP file not found"
             exit 1
           fi
 
+          echo "ZIP found:"
+          echo "$ZIP"
+
+          rm -rf extracted
           mkdir -p extracted
+
           unzip -q "$ZIP" -d extracted
 
-      - name: Find Android Project
-        run: |
-          PROJECT=$(find extracted -type f \( \
-            -name "settings.gradle.kts" -o \
-            -name "settings.gradle" \
-          \) | head -n 1)
+          echo ""
+          echo "Extracted files:"
+          find extracted -maxdepth 2 -type f | head -100
 
-          if [ -z "$PROJECT" ]; then
-            echo "Android project not found"
+      # 3. Find React/Vite project
+      - name: Find Web Project
+        shell: bash
+        run: |
+          set -e
+
+          PACKAGE=$(find extracted -type f -name "package.json" | head -n 1)
+
+          if [ -z "$PACKAGE" ]; then
+            echo "ERROR: package.json not found"
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$PROJECT")
+          PROJECT_DIR=$(dirname "$PACKAGE")
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Android project:"
+          echo ""
+          echo "Test Mitra project:"
           echo "$PROJECT_DIR"
 
+          echo ""
+          echo "Project files:"
+          ls -la "$PROJECT_DIR"
+
+      # 4. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: "${{ env.PROJECT_DIR }}/package.json"
+
+      # 5. Setup JDK 17
       - name: Setup JDK 17
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Setup Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: "9.3.1"
-
-      - name: Fix KSP CI compatibility
+      # 6. Install npm dependencies
+      - name: Install npm dependencies
         working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
         run: |
-          if [ -f gradle/libs.versions.toml ]; then
-            sed -i 's/googleDevtoolsKsp = "2.3.10"/googleDevtoolsKsp = "2.3.9"/' gradle/libs.versions.toml
-          fi
+          set -e
 
-          echo "KSP configuration:"
-          grep -n "googleDevtoolsKsp" gradle/libs.versions.toml || true
+          npm install
 
-      - name: Create Debug Keystore
+      # 7. Install Capacitor
+      - name: Install Capacitor
         working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
         run: |
-          keytool -genkeypair \
-            -v \
-            -keystore debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          set -e
 
-      - name: Build Debug APK
+          npm install @capacitor/core@7.4.4
+          npm install -D @capacitor/cli@7.4.4
+          npm install @capacitor/android@7.4.4
+
+      # 8. Build React/Vite application
+      - name: Build Web Application
         working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
         run: |
-          gradle clean assembleDebug \
-            --no-daemon \
-            --no-configuration-cache \
-            --stacktrace
+          set -e
 
-      - name: Verify APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          APK=$(find app/build/outputs/apk/debug -type f -name "*.apk" | head -n 1)
+          npm run build
 
-          if [ -z "$APK" ]; then
-            echo "APK was not generated"
+          if [ ! -d "dist" ]; then
+            echo "ERROR: dist folder was not created"
             exit 1
           fi
 
-          echo "APK generated successfully:"
+          echo ""
+          echo "Web build completed:"
+          du -sh dist
+
+      # 9. Create Capacitor configuration
+      - name: Create Capacitor Configuration
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f "capacitor.config.ts" ] && [ ! -f "capacitor.config.json" ]; then
+            npx cap init "Test Mitra" "com.testmitra.app" --web-dir dist
+          fi
+
+          echo ""
+          echo "Capacitor configuration:"
+          ls -la capacitor.config.* 2>/dev/null || true
+
+      # 10. Add Android platform
+      - name: Add Android Platform
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -d "android" ]; then
+            npx cap add android
+          else
+            echo "Android platform already exists"
+          fi
+
+      # 11. Copy web files into Android project
+      - name: Sync Capacitor Android
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          npx cap sync android
+
+      # 12. Show Android project
+      - name: Verify Android Project
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f "android/settings.gradle" ] && [ ! -f "android/settings.gradle.kts" ]; then
+            echo "ERROR: Android Gradle project was not created"
+            exit 1
+          fi
+
+          if [ ! -f "android/gradlew" ]; then
+            echo "ERROR: Gradle wrapper was not created"
+            exit 1
+          fi
+
+          echo "Android project created successfully."
+
+      # 13. Build APK
+      - name: Build Debug APK
+        working-directory: ${{ env.PROJECT_DIR }}/android
+        shell: bash
+        run: |
+          set -e
+
+          chmod +x gradlew
+
+          ./gradlew assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      # 14. Verify APK
+      - name: Verify APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          APK=$(find android/app/build/outputs/apk/debug \
+            -type f \
+            -name "*.apk" \
+            | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated"
+            exit 1
+          fi
+
+          echo ""
+          echo "======================================"
+          echo "APK GENERATED SUCCESSFULLY"
+          echo "======================================"
+          echo ""
+
           ls -lh "$APK"
 
-      - name: Upload APK
+      # 15. Upload APK
+      - name: Upload Test Mitra APK
         uses: actions/upload-artifact@v6
         with:
           name: Test-Mitra-APK
-          path: "${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk"
+          path: "${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/*.apk"
           if-no-files-found: error
